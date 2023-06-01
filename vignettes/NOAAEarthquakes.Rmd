@@ -1,0 +1,181 @@
+---
+title: "NOAA_Earthquakes"
+author: Brenda Morale
+date: "01Jun2023"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{NOAAEarthquakes}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+library(NOAAEarthquakes)
+
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  collapse = TRUE,
+  comment = "#>",
+  out.width = "100%"
+)
+```
+
+```{r setup}
+library(leaflet)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(lubridate)
+```
+
+## Package Description
+
+This is a Peer-graded Capstone Assignment from Coursera's Mastering Software Development in R. 
+
+## Included data
+
+Data files included within the package are:
+
+```{r}
+list.files(system.file("extdata", package = "NOAAEarthquakes"))
+```
+
+This NOAA Earthquake package contains data on significant earthquakes from 2150 B.C. to the present (May2023) provided by the National Centers For Environmental Information on [https://www.ngdc.noaa.gov](https://www.ngdc.noaa.gov). The tab-delimited data were downloaded as a TSV (tab separated value) file ('earthquakes.tsv') from the [NCEI/WDS Global Significant Earthquake Database](https://www.ngdc.noaa.gov/hazel/view/hazards/earthquake/search).
+
+This vignette explains how to use the functions in this package to read and clean the data, geoms to visualize and label earthquakes on a timeline, and functions to display and label earthquakes on a map. Specifically:
+
+* eq_read_data()
+* eq_location_clean()
+* eq_clean_data()
+
+* geom_timeline()
+* geom_timeline_label()
+
+* eq_map()
+* eq_create_label()
+
+
+# Reading and Cleaning Data
+
+By default, *eq_read_data()* reads the TSV file ('earthquakes.tsv') included in the package. *eq_read_data()* has one optional argument `filename`, the path (string) to a file containing tab-delimited data downloaded from the [NCEI/WDS Global Significant Earthquake Database](https://www.ngdc.noaa.gov/hazel/view/hazards/earthquake/search). *eq_read_data()* reads in the file to a dataframe and formats the column names:
+
+```{r read_data}
+# Read in the data
+data <- eq_read_data() 
+
+# View the last 5 rows
+data %>%
+  dplyr::select(YEAR, MONTH, DAY, LOCATION, LONGITUDE, LATITUDE, MAG, TOTAL_DEATHS) %>%
+  utils::tail(n=5)
+```
+
+*eq_location_clean()* has one optional argument `data`. The argument should be a dataframe produced by *eq_read_data()*; if no argument is given, *eq_read_data()* is called internally. *eq_location_clean()* splits the `LOCATION` column into separate columns `COUNTRY` and `REGION`. `LOCATION` usually appears as "COUNTRY: REGION" (e.g. "JAPAN:TOKYO") 
+
+```{r, location_clean}
+# Pass previous data to eq_location_clean
+data <- data %>% 
+  eq_location_clean() 
+
+# View the first 5 rows
+data %>%
+  dplyr::select(YEAR, MONTH, DAY, COUNTRY, REGION, LONGITUDE, LATITUDE, MAG, TOTAL_DEATHS) %>%
+  utils::head(n=5)
+```
+
+*eq_clean_data()* takes one optional argument `data`, a dataframe output by *eq_location_clean()*. If no argument is specified, *eq_location_clean()* is called internally. *eq_clean_data()* creates a `DATE` column using values from the `HOUR`, `MINUTE` and `SECONDS` columns and functions from the lubridate package.
+
+```{r clean_data}
+# Pass previous data to eq_clean_data
+data <- data %>%
+  eq_clean_data()
+
+# View the last 5 rows
+data %>%
+  dplyr::select(DATE, COUNTRY, REGION, LONGITUDE, LATITUDE, MAG, TOTAL_DEATHS) %>%
+  utils::tail()
+```
+
+Note, that the same output can be obtained by using *eq_clean_data()* without passing any arguments:
+
+```{r clean_data1}
+# Generate same dataset as before
+data <- eq_clean_data()
+
+# View the first 5 rows
+data %>%
+  dplyr::select(DATE, YEAR, COUNTRY, REGION, LONGITUDE, LATITUDE, MAG, TOTAL_DEATHS) %>%
+  utils::head(n=5)
+```
+
+The remaining examples subset the data to include only a few relevant columns and observations:
+
+```{r subset}
+data <- data %>% 
+    dplyr::filter(!is.na(TOTAL_DEATHS)) %>% 
+    dplyr::select(DATE, YEAR, COUNTRY, REGION, LONGITUDE, LATITUDE, MAG, TOTAL_DEATHS) %>%
+    tidyr::drop_na()
+```
+
+# Timelines
+
+*geom_timeline()* can be used to draw a timeline by adding layers to ggplot. `x` is the only required aesthetic which determines where along the timeline circles will be placed. The optional aesthetic `y` determines the other timelines to be displayed. The optional aesthetics `size`,`color`, and `alpha` respectively determine the size, color and transparency of the circles drawn along the timeline.
+
+```{r, timeline, eval = FALSE}
+# Subset data to only earthquakes in three countries beginning in 2003.
+data %>% dplyr::filter(YEAR > 2002,
+                       COUNTRY %in% c("JAPAN", "CHINA","NEPAL")) %>%
+    ggplot2::ggplot(aes(x = DATE,
+                        y = COUNTRY,
+                        size = MAG,
+                        color = TOTAL_DEATHS)) +
+    geom_timeline()
+```
+```{r timeline1, echo=FALSE, out.width = '100%'}
+knitr::include_graphics(file.path("../images", "Vignette_Timeline.png"))
+```
+
+*geom_timeline_label()* can be used to draw labels with markers (line segments) by adding layers to ggplot. *geom_timeline_label()* should be used with the timelines generated by *geom_timeline()*. `x` is a required aesthetic that determines where along the timeline the markers will be placed. Other required aesthetics include `label` which establishes the labels and `mag` ranks the observations according to magnitude. The aesthetic `y` is optional and allows for vertical stratification. Other optional aesthetics include `color` and `alpha` (color and transparency) of the line segments; `n_max` (`n_max = 3` by default) is the number of labelled observations:
+
+```{r, timelinelabel, eval = FALSE}
+data %>% dplyr::filter(COUNTRY == "MEXICO", 
+                              YEAR >= 2000) %>%
+  ggplot2::ggplot(aes(x = DATE,
+                      y = COUNTRY,
+                      size = MAG,
+                      color = TOTAL_DEATHS,
+                      label = REGION,
+                      mag = MAG)) +
+  geom_timeline() +
+  geom_timeline_label(aes(n_max = 5))
+```
+
+```{r timelinelabel1, echo=FALSE, out.width = '100%'}
+knitr::include_graphics(file.path("../images", "Vignette_AnnotatedTimeline.png"))
+```
+# Leaflet Maps
+
+*eq_map()* uses the `leaflet` package to generate maps and takes one argument `annot_col` that specifies the column to use for annotation (by default `annot_col = DATE`) which is displayed as pop-up text over a circle centered at each coordinate. For a dataframe with the columns `LONGITUDE`, `LATITUDE`, `MAG`, `annot_col` displays this information in the pop-up text instead. 
+
+```{r, basicmap, eval = FALSE}
+data %>% 
+  dplyr::filter(COUNTRY == "MEXICO", 
+                YEAR    >= 2000) %>% 
+  eq_map(annot_col = "DATE")
+```
+```{r basicmap1, echo=FALSE, out.width = '100%'}
+knitr::include_graphics(file.path("../images", "Vignette_LeafletMap.png"))
+```
+
+Used in conjunction with *eq_map()*, *eq_create_label()* generates a fancier HTML label.
+
+```{r, fancymap, eval = FALSE}
+data %>% 
+  dplyr::filter(COUNTRY == "MEXICO",
+                YEAR >= 2000) %>% 
+  dplyr::mutate(popup_text = eq_create_label(.)) %>% 
+  eq_map(annot_col = "popup_text")
+```
+```{r fancymap1, echo=FALSE, out.width = '100%'}
+knitr::include_graphics(file.path("../images", "Vignette_FancyLeafletMap.png"))
+```
